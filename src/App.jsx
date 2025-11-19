@@ -1,73 +1,128 @@
-function App() {
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
+
+function EventPopup({ event, onClose }) {
+  const audioRef = useRef(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const onTime = () => setCurrentTime(audio.currentTime)
+    audio.addEventListener('timeupdate', onTime)
+    return () => audio.removeEventListener('timeupdate', onTime)
+  }, [])
+
+  const activeCue = useMemo(() => {
+    if (!event.subtitles) return null
+    return event.subtitles.find(c => currentTime >= c.start && currentTime <= c.end)
+  }, [currentTime, event.subtitles])
+
+  const togglePlay = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (isPlaying) { audio.pause(); setIsPlaying(false) }
+    else { audio.play(); setIsPlaying(true) }
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Subtle pattern overlay */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.05),transparent_50%)]"></div>
-
-      <div className="relative min-h-screen flex items-center justify-center p-8">
-        <div className="max-w-2xl w-full">
-          {/* Header with Flames icon */}
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center justify-center mb-6">
-              <img
-                src="/flame-icon.svg"
-                alt="Flames"
-                className="w-24 h-24 drop-shadow-[0_0_25px_rgba(59,130,246,0.5)]"
-              />
-            </div>
-
-            <h1 className="text-5xl font-bold text-white mb-4 tracking-tight">
-              Flames Blue
-            </h1>
-
-            <p className="text-xl text-blue-200 mb-6">
-              Build applications through conversation
-            </p>
-          </div>
-
-          {/* Instructions */}
-          <div className="bg-slate-800/50 backdrop-blur-sm border border-blue-500/20 rounded-2xl p-8 shadow-xl mb-6">
-            <div className="flex items-start gap-4 mb-6">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center font-bold">
-                1
-              </div>
-              <div>
-                <h3 className="font-semibold text-white mb-1">Describe your idea</h3>
-                <p className="text-blue-200/80 text-sm">Use the chat panel on the left to tell the AI what you want to build</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4 mb-6">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center font-bold">
-                2
-              </div>
-              <div>
-                <h3 className="font-semibold text-white mb-1">Watch it build</h3>
-                <p className="text-blue-200/80 text-sm">Your app will appear in this preview as the AI generates the code</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center font-bold">
-                3
-              </div>
-              <div>
-                <h3 className="font-semibold text-white mb-1">Refine and iterate</h3>
-                <p className="text-blue-200/80 text-sm">Continue the conversation to add features and make changes</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="text-center">
-            <p className="text-sm text-blue-300/60">
-              No coding required • Just describe what you want
-            </p>
-          </div>
+    <div className="w-[320px]">
+      <h3 className="text-lg font-semibold mb-1">{event.title}</h3>
+      <p className="text-xs text-gray-600 mb-2">{event.year > 0 ? event.year : `${Math.abs(event.year)} av. J.-C.`}</p>
+      <p className="text-sm text-gray-800 mb-3">{event.description}</p>
+      {event.images?.[0] && (
+        <img src={event.images[0]} alt={event.title} className="w-full h-32 object-cover rounded mb-3" />
+      )}
+      {event.audio_url && (
+        <div className="mb-2">
+          <audio ref={audioRef} src={event.audio_url} preload="metadata" />
+          <button onClick={togglePlay} className="px-3 py-1 text-sm rounded bg-blue-600 text-white">
+            {isPlaying ? 'Pause' : 'Play'} narration
+          </button>
         </div>
+      )}
+      {activeCue && (
+        <div className="text-sm bg-black/80 text-white p-2 rounded">
+          {activeCue.text}
+        </div>
+      )}
+      <div className="mt-3">
+        <button onClick={onClose} className="text-xs text-blue-600 underline">Fermer</button>
+      </div>
+    </div>
+  )}
+
+function MapView() {
+  const [events, setEvents] = useState([])
+  const [yearRange, setYearRange] = useState({ from: -300, to: new Date().getFullYear() })
+
+  const backend = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const url = new URL('/api/events', backend)
+        url.searchParams.set('limit', '500')
+        url.searchParams.set('year_from', String(yearRange.from))
+        url.searchParams.set('year_to', String(yearRange.to))
+        const res = await fetch(url.toString())
+        const data = await res.json()
+        setEvents(data)
+      } catch (e) {
+        console.error('Failed to load events', e)
+      }
+    }
+    load()
+  }, [yearRange.from, yearRange.to])
+
+  const center = [48.8566, 2.3522]
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="p-4 bg-slate-900 text-white flex items-center justify-between">
+        <h1 className="font-bold text-lg">Paris • 23 siècles d'histoires</h1>
+        <div className="flex items-center gap-2 text-sm">
+          <span>{yearRange.from <= 0 ? `${Math.abs(yearRange.from)} av. J.-C.` : yearRange.from}</span>
+          <input
+            type="range"
+            min="-300"
+            max={new Date().getFullYear()}
+            value={yearRange.from}
+            onChange={e => setYearRange(r => ({ ...r, from: parseInt(e.target.value) }))}
+          />
+          <span>{yearRange.to}</span>
+          <input
+            type="range"
+            min="-300"
+            max={new Date().getFullYear()}
+            value={yearRange.to}
+            onChange={e => setYearRange(r => ({ ...r, to: parseInt(e.target.value) }))}
+          />
+        </div>
+      </header>
+      <div className="flex-1">
+        <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
+          <TileLayer
+            attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {events.map((ev, idx) => (
+            <Marker key={idx} position={[ev.latitude, ev.longitude]}>
+              <Popup>
+                <EventPopup event={ev} onClose={() => {}} />
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
       </div>
     </div>
   )
+}
+
+function App() {
+  return <MapView />
 }
 
 export default App
